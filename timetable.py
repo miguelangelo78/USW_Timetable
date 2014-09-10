@@ -1,9 +1,21 @@
 import re
 import xlsxwriter
+import sys
+import os
 
 #GLOBAL VARIABLES:
+filepath=""
+filename=""
+try:
+    filepath, filename = os.path.split(sys.argv[1])
+except:
+    print "You have to drop an HTML file of your timetable on top of this script in order for it to work"
+    raw_input()
+    sys.exit()
+DEBUGMODE=False
+conflicts={};
 coursename=""
-currentyear=""
+courseweeks=""
 WEEKDAYS_COUNT=5
 IGNORE_FIELDS_OFFSET=7
 WEEKDAY_NAMES={"MONDAY":0,"TUESDAY":1,"WEDNESDAY":2,"THURSDAY":3,"FRIDAY":4,"SATURDAY":5,"SUNDAY":6};
@@ -12,7 +24,7 @@ MONTH_LENGTHS={MONTH_LIST[0]:30,MONTH_LIST[1]:31,MONTH_LIST[2]:30,MONTH_LIST[3]:
                MONTH_LIST[5]:28,MONTH_LIST[6]:31,MONTH_LIST[7]:30,MONTH_LIST[8]:31,MONTH_LIST[9]:30};
 WEEKDAY_COUNT=7
 #EXCEL STYLES:
-EXCEL_MONTH_MARGINTOP=3
+EXCEL_MONTH_MARGINTOP=4
 EXCEL_MONTH_MARGINBOTTOM=2
 EXCEL_HOUR_MARGINLEFT=0
 EXCEL_HOUR_START=8
@@ -20,7 +32,7 @@ EXCEL_HOUR_END=21
 EXCEL_HOUR_INTERVAL=0.5
 EXCEL_1STCOL_WIDTH=20
 EXCEL_DAY_ROWHEIGHT=60
-EXCEL_DAY_COLWIDTH=15
+EXCEL_DAY_COLWIDTH=8
 #CLASSES VARIABLES:
 CLASSES_STARTWEEK_OFFSET=8
 CLASSES_MODULE_TABLE_ELEM_COUNT=7
@@ -31,6 +43,12 @@ def list_indexof(lst,str):
         if lst[i]==str:
             return i
     return -1
+
+def dict_sumvals(dict,length):
+    s=0
+    for i in range(length):
+        s+=dict[MONTH_LIST[i]]+EXCEL_MONTH_MARGINBOTTOM+1
+    return s
 
 def drange(start,stop,step):
     r=start
@@ -44,14 +62,20 @@ def dict_getkey_byval(dict,value):
             return key
                 
 def create_timetable_structure(filepath,filename):
+    global coursename,courseweeks
     timetable_struct=[]
-    timetable_html_file=open(filepath+filename,"r")
+    timetable_html_file=open(filepath+"\\"+filename,"r")
+    print filepath+"\\"+filename
+    timetable_html_text=timetable_html_file.read()
     #FETCH ALL WEEK DAYS
-    match_weekdays=re.findall(r'<p>(?:.|\n)+?labelone(?:.|\n)+?table>', timetable_html_file.read(), re.S|re.M)
+    match_weekdays=re.findall(r'<p>(?:.|\n)+?labelone(?:.|\n)+?table>', timetable_html_text, re.S|re.M)
     if match_weekdays:
         for week_ctr in range(WEEKDAYS_COUNT):
             table_match=re.findall(r'(?:<td>(.+?)<\/td>)',match_weekdays[week_ctr],0)
             table_match=table_match[IGNORE_FIELDS_OFFSET:]
+            metadata=re.findall(r'Course:.+?\">(.+?)<.+?Weeks:.+?">(.+?)<.+?\(.+?">(.+?)<',timetable_html_text,re.S)
+            coursename=metadata[0][0]
+            courseweeks="Weeks: "+metadata[0][1]+" ("+metadata[0][2]+")"
             
             #FIX WEEKS IN THE MATCH:
             weeks_splitted=[]
@@ -100,22 +124,31 @@ def get_days_byweeks(weekday,days_interval):
                 else:
                     daylist.append([MONTH_LIST[month],(days+WEEKDAY_NAMES[weekday])])
                 return daylist  
-def create_excelfile(timetable,coursename,filepath,excelfile):
-    workbk=xlsxwriter.Workbook(filepath+excelfile)
-    worksht=workbk.add_worksheet(coursename+" timetable")
+
+
+
+def cap(s, l):
+    return s if len(s)<=l else s[0:l-3]+'...'
+
+def create_excelfile(timetable,filepath):
+    global coursename,courseweeks
+    workbk=xlsxwriter.Workbook(filepath+"\\course_"+coursename.lower().replace(" ","_").replace("/","_")+"_timetable.xlsx")
+    worksht=workbk.add_worksheet(cap(coursename,21)+" timetable")
     #EXCEL STYLES:
     EXCEL_STYLE1=workbk.add_format({'bold':True,'bg_color':"#1C6D73",'font_size':20,'font_color':"#FFFFFF",'align':'center'}) # MONTHS
     EXCEL_STYLE2=workbk.add_format({'bold':True,'bg_color':"#68B7BD",'align':'center','valign':'vcenter'}) # HOURS
     EXCEL_STYLE3=workbk.add_format({'bold':True,'bg_color':"#68B7BD",'align':'center','valign':'vcenter','text_wrap':True}) # DAYS
-    EXCEL_STYLE4=workbk.add_format({'bg_color':'#CADDDE','align':'left','text_wrap':True}) # CLASSES
+    EXCEL_STYLE4=workbk.add_format({'bg_color':'#CADDDE','valign':'top','align':'left','text_wrap':True,'border':1,'font_size':9}) # CLASSES
+    EXCEL_STYLE5=workbk.add_format({'bg_color':'#133E69','bold':True,'font_size':18,'border':1,'valign':'vcenter','text_wrap':True,'align':'center','font_color':'#FFFFFF'}); # TITLE
+    EXCEL_STYLE6=workbk.add_format({'bg_color':'#56799C','border':1,'valign':'vcenter','text_wrap':True,'align':'center','font_color':'#FFFFFF'}); #WEEKS
     # CONSTRUCT EXCEL FILE - BEGIN 
     
     #INSERT STRUCTURE OF MONTH, DAYS AND HOURS:
     worksht.set_column("A:A",EXCEL_1STCOL_WIDTH)
-    #TITLE AND YEAR:
+    #TITLE, YEAR AND WEEKS:
     worksht.set_column("B:AB",EXCEL_DAY_COLWIDTH)
-    worksht.merge_range('A1:D2',"<TITLE HERE>")
-    worksht.merge_range('E1:F2',"<YEAR HERE>")
+    worksht.merge_range('A1:H3',"Course: "+coursename,EXCEL_STYLE5)
+    worksht.merge_range('I1:K3',courseweeks,EXCEL_STYLE6)
     #REST OF THE STRUCTURE:
     day_offset=EXCEL_MONTH_MARGINTOP
     day_permctr=0
@@ -149,7 +182,8 @@ def create_excelfile(timetable,coursename,filepath,excelfile):
     for weekday in range(len(timetable)):
         timetable_noweekday=timetable[weekday][1:]
         
-        print dict_getkey_byval(WEEKDAY_NAMES, weekday),":"
+        if DEBUGMODE:
+            print dict_getkey_byval(WEEKDAY_NAMES, weekday),":"
         for module_ctr in range(CLASSES_MODULE_MAX_COUNT):
             module_start=module_ctr*CLASSES_MODULE_TABLE_ELEM_COUNT
             module_end=module_ctr*CLASSES_MODULE_TABLE_ELEM_COUNT+CLASSES_MODULE_TABLE_ELEM_COUNT
@@ -163,7 +197,8 @@ def create_excelfile(timetable,coursename,filepath,excelfile):
                 module[timetable_week_index]=daylist
                 timetable_weeksfixed.append(module)
                 
-                print "Module ",module_ctr,module
+                if DEBUGMODE:
+                    print "Module ",module_ctr,module
                 hour_begin=re.findall(r"([0-9].+?)",module[2])
                 hour_end=re.findall(r"([0-9].+?)",module[3])
                 class_col_begin=(int(hour_begin[0])-8)*2+1
@@ -173,25 +208,37 @@ def create_excelfile(timetable,coursename,filepath,excelfile):
                 if(hour_end[1].find("30")>-1):
                     class_col_end+=1
                 class_rows=[]
+                 
+                    
                 for i in range(len(module[timetable_week_index])):
                     for j in range(len(module[timetable_week_index][i])):
                         monthname=module[timetable_week_index][i][j][0]
                         monthindex=list_indexof(MONTH_LIST,monthname)
                         day_monthoffset=module[timetable_week_index][i][j][1]
-                        if monthindex<=0:
-                            class_rows.append(MONTH_LENGTHS[monthname]*monthindex+EXCEL_MONTH_MARGINTOP+day_monthoffset)
-                        else:
-                            class_rows.append(MONTH_LENGTHS[monthname]*monthindex+EXCEL_MONTH_MARGINBOTTOM+EXCEL_MONTH_MARGINTOP)
+                        class_rows.append(dict_sumvals(MONTH_LENGTHS, monthindex)+EXCEL_MONTH_MARGINTOP+day_monthoffset)
+                
+                #INSERT CLASSES:
                 for i in range(len(class_rows)):
-                    worksht.merge_range(class_rows[i],class_col_begin,class_rows[i],class_col_end,module[0])
-                    #worksht.write(class_rows[i]],)
-                print class_rows
-                #print "    Col: ",class_col_begin," to ",class_col_end
-        #print timetable_weeksfixed        
+                    if(class_rows[i] in conflicts):
+                        if class_col_begin==conflicts[class_rows[i]][1]:
+                            class_col_begin+=1
+                            class_col_end+=1
+                        else:
+                            if(class_col_begin>conflicts[class_rows[i]][0] and class_col_end<=conflicts[class_rows[i]][1]):
+                                break
+                        if DEBUGMODE:
+                            print "Conflict: Row: ",class_rows[i]," Col begin: ",class_col_begin,",",conflicts[class_rows[i]][0]," Col end: ",class_col_end,",",conflicts[class_rows[i]][1]
+                    
+                    #CLASS WAS ADDED TO A DICTIONARY TO PREVENT FUTURE CONFLICTS
+                    conflicts[class_rows[i]]=[class_col_begin,class_col_end]
+                    #INSERT CLASS:
+                    worksht.merge_range(class_rows[i],class_col_begin,class_rows[i],class_col_end,
+                                        module[0]+"\n"+module[1]+"\n"+module[2]+"h-"+module[3]+"h\n"+
+                                        module[5]+" "+module[6],EXCEL_STYLE4)
         print ""
     # CONSTRUCT EXCEL FILE - END
     workbk.close()
     
-def main(coursename,filepath,filename,excelfile):
-    create_excelfile(create_timetable_structure(filepath, filename),coursename,filepath,excelfile)  
-main("Comp. Systems Eng.","C:\\Users\\Miguel\\Desktop\\","list.htm","course_timetable.xlsx")
+def main(filepath,filename):
+    create_excelfile(create_timetable_structure(filepath, filename),filepath)  
+main(filepath,filename)
